@@ -992,9 +992,9 @@ class StroomerPredictor:
         self.global_count_cap: int = 30
 
         # bobot error gabungan
-        self.weights = {"P": 0.4, "I": 0.4, "PF": 0.2}
+        self.weights = {"P": 1, "PF": 1}
         # toleransi relatif di domain P untuk pruning awal
-        self.tolerance = 0.08  # 8%
+        self.tolerance = 0.01  # 1%
 
         # compile regex nama "lampu_18w", "Lampu 32 W", dst
         self._LAMPU_W_RE = re.compile(r"(?i)\blampu[_\-\s]*([0-9]{1,4})\s*w\b")
@@ -1111,39 +1111,56 @@ class StroomerPredictor:
         units_pf: List[float],
         V: Optional[float],
         baseline_P: float,
+        I_meas: Optional[float] = None,   # <= NEW: arus terukur (opsional)
     ):
         """
-        Hitung (P_sum, I_hat, PF_hat) untuk kombinasi counts,
-        dengan baseline_P = total standby semua unit yang ADA (off-state).
-        P_sum = baseline_P + sum(c_i * activeP_i)
-        Q hanya dihitung dari komponen AKTIF (standby diabaikan → mendekati resistif).
+        Hitung (P_sum, I_hat, PF_hat, V_hat) untuk kombinasi counts.
+        - baseline_P = total standby semua unit yang ADA (off-state).
+        - P_sum = baseline_P + sum(c_i * activeP_i)
+        - Q dihitung dari komponen AKTIF (standby ~ resistif → diabaikan).
+        - I_hat dihitung jika V tersedia: I_hat = S_sum / V.
+        - V_hat:
+            * jika V ada → V_hat = V
+            * elif I_meas ada → V_hat = S_sum / I_meas
+            * else → None
         """
         # daya real total
         P_sum_active = sum(c * p for c, p in zip(counts, units_activeP))
         P_sum = baseline_P + P_sum_active
-
-        if V is None or V <= 0:
-            return P_sum, None, None
 
         # reaktif dari komponen aktif
         Q_sum = 0.0
         for c, p_act, pf in zip(counts, units_activeP, units_pf):
             if c == 0:
                 continue
-            tq = 0.0 if pf >= 1.0 else math.sqrt(max(0.0, 1.0 / (pf * pf) - 1.0))
-            Q_sum += c * p_act * tq
+            tan_phi = 0.0 if pf >= 1.0 else math.sqrt(max(0.0, 1.0/(pf*pf) - 1.0))
+            Q_sum += c * p_act * tan_phi
 
-        S_sum = math.sqrt(P_sum * P_sum + Q_sum * Q_sum)
-        I_hat = S_sum / V
-        PF_hat = P_sum / S_sum if S_sum > 0 else 1.0
-        return P_sum, I_hat, PF_hat
+        # daya semu total
+        S_sum = math.hypot(P_sum, Q_sum)  # sqrt(P^2 + Q^2)
+
+        # arus prediksi (butuh V)
+        I_hat = (S_sum / V) if (V is not None and V > 0) else None
+
+        # power factor prediksi
+        PF_hat = (P_sum / S_sum) if S_sum > 0 else 1.0
+
+        # tegangan prediksi
+        if V is not None and V > 0:
+            V_hat = float(V)
+        elif I_meas is not None and I_meas > 0:
+            V_hat = S_sum / I_meas
+        else:
+            V_hat = None
+
+        return P_sum, I_hat, PF_hat, V_hat
 
     def _loss(self, P_hat, I_hat, PF_hat, P_meas, I_meas, PF_meas):
-        wP, wI, wPF = self.weights["P"], self.weights["I"], self.weights["PF"]
+        wP, wPF = self.weights["P"], self.weights["PF"]
         loss = 0.0
         loss += wP * (abs(P_hat - P_meas) / max(1.0, P_meas))
-        if I_meas is not None and I_hat is not None and I_meas > 0:
-            loss += wI * (abs(I_hat - I_meas) / I_meas)
+        # if I_meas is not None and I_hat is not None and I_meas > 0:
+        #     loss += wI * (abs(I_hat - I_meas) / I_meas)
         if PF_meas is not None and PF_hat is not None:
             loss += wPF * (abs(PF_hat - PF_meas))
         return loss
@@ -1222,50 +1239,146 @@ class StroomerPredictor:
         best_counts = [0] * n
         cur_counts = [0] * n
 
-        def dfs(idx: int, cur_activeP: float):
-            nonlocal best_loss, best_counts
+        # ====== Tambahan: siapkan Q per unit + suffix Q max untuk pruning ======
+        units_Q = []
+        for p_act, pf in zip(units_activeP, units_pf):
+            tan_phi = 0.0 if pf >= 1.0 else math.sqrt(max(0.0, 1.0/(pf*pf) - 1.0))
+            units_Q.append(p_act * tan_phi)
 
-            cur_P = baseline_P + cur_activeP
+        suffixQ_max = [0.0] * (n + 1)
+        for i in range(n - 1, -1, -1):
+            suffixQ_max[i] = suffixQ_max[i + 1] + units_Q[i] * bounds[i]
 
+        # target Q jika ada (butuh V, I, PF)
+        Q_meas = None
+        if V is not None and I_meas is not None and PF_meas is not None:
+            S_meas = float(V) * float(I_meas)
+            pf_c = max(0.0, min(1.0, float(PF_meas)))
+            Q_meas = math.sqrt(max(0.0, S_meas * S_meas * (1.0 - pf_c * pf_c)))
+
+        # toleransi absolut untuk Q (skala mirip P bila Q_meas tak ada)
+        tol_Q_abs = max(1.0, self.tolerance * (Q_meas if (Q_meas and Q_meas > 0) else P_meas))
+
+        # ====== Memoization & early-stop flag ======
+        p_grid = max(1.0, self.tolerance * P_meas)  # grid diskret P untuk memo key
+        visited = set()
+        perfect_found = False
+
+        wP = self.weights.get("P", 1.0)
+        wQ = self.weights.get("Q", 0.0)
+
+        def _lower_bound_loss(curP: float, curQ: float, idx: int) -> float:
+            """
+            Bound loss minimum yang masih mungkin dicapai dari state saat ini.
+            Pakai P (dan Q bila tersedia). Komponen I/PF diabaikan (0) agar bound admissible.
+            """
+            # --- P lower bound ---
+            # tidak bisa mengurangi P; hanya bisa menambah
+            if curP > P_meas:
+                p_err_lb = curP - P_meas
+            else:
+                p_err_lb = max(0.0, P_meas - (curP + suffix_activeP_max[idx]))
+            lb = wP * (p_err_lb / max(1.0, P_meas))
+
+            # --- Q lower bound (opsional) ---
+            if Q_meas is not None:
+                if curQ > Q_meas:
+                    q_err_lb = curQ - Q_meas
+                else:
+                    q_err_lb = max(0.0, Q_meas - (curQ + suffixQ_max[idx]))
+                lb += wQ * (q_err_lb / max(1.0, Q_meas if Q_meas > 1.0 else 1.0))
+            return lb
+
+        def _counts_order(c_guess: int, c_max: int):
+            """
+            Urutan zig-zag dari sekitar tebakan terbaik (greedy around-the-mean):
+            c_guess, c_guess-1, c_guess+1, c_guess-2, ...
+            """
+            c_guess = max(0, min(c_guess, c_max))
+            yield c_guess
+            for d in range(1, c_max + 1):
+                a = c_guess - d
+                b = c_guess + d
+                if a >= 0: yield a
+                if b <= c_max: yield b
+
+        def dfs(idx: int, cur_activeP: float, cur_activeQ: float):
+            nonlocal best_loss, best_counts, perfect_found
+            if perfect_found:
+                return
+
+            cur_P = baseline_P + cur_activeP  # Q baseline diasumsikan ~0 (standby ~ resistif)
+            cur_Q = cur_activeQ
+
+            # Memo: diskretkan P agar state space tidak meledak
+            state_key = (idx, int(round(cur_P / p_grid)))
+            if state_key in visited:
+                return
+            visited.add(state_key)
+
+            # Pruning domain sederhana (tidak mungkin mendekati P dalam batas suffix)
             if not do_strict:
-                # PRUNING AMAN (non-strict): jika bahkan dengan sisa maksimum
-                # tidak mungkin mendekati P_meas, hentikan cabang ini.
                 if (P_meas - (cur_P + suffix_activeP_max[idx])) > tol_abs:
                     return
-                # CATATAN: dulu ada pruning "rough loss by P" di sini; DIHAPUS
-                # karena bisa salah buang kombinasi yang I/PF-nya jauh lebih cocok.
+                if Q_meas is not None and (Q_meas - (cur_Q + suffixQ_max[idx])) > tol_Q_abs:
+                    return
+
+            # Lower-bound loss: jika bahkan bound >= best_loss, buang
+            lb = _lower_bound_loss(cur_P, cur_Q, idx)
+            if lb >= best_loss - 1e-12:
+                return
 
             if idx == n:
-                P_hat, I_hat, PF_hat = self._aggregate(cur_counts, units_activeP, units_pf, V, baseline_P)
+                P_hat, I_hat, PF_hat, V_hat = self._aggregate(cur_counts, units_activeP, units_pf, V, baseline_P, I_meas=I_meas)
                 l = self._loss(P_hat, I_hat, PF_hat, P_meas, I_meas, PF_meas)
                 if l < best_loss:
                     best_loss = l
                     best_counts = cur_counts.copy()
+                    # early stop kalau P sudah tepat dalam toleransi dan loss ~ 0
+                    if abs(P_hat - P_meas) <= tol_abs and l <= 1e-12:
+                        perfect_found = True
                 return
 
-            P_u_act = units_activeP[idx]
+            P_u = units_activeP[idx]
+            Q_u = units_Q[idx]
             max_c = bounds[idx]
 
+            # Batas iter dinamis agar tidak overshoot jauh saat non-strict
             if do_strict:
-                # Telusuri SEMUA kemungkinan count pada indeks ini
                 c_max_iter = max_c
             else:
-                # Tetap batasi agar tidak overshoot jauh saat non-strict
-                c_max_iter = int(min(max_c, math.ceil((P_meas + tol_abs - cur_P) / max(1.0, P_u_act))))
+                c_max_by_P = int(min(max_c, math.ceil((P_meas + tol_abs - cur_P) / max(1.0, P_u))))
+                if Q_meas is not None and Q_u > 0:
+                    c_max_by_Q = int(math.ceil((Q_meas + tol_Q_abs - cur_Q) / Q_u))
+                    c_max_iter = max(0, min(max_c, c_max_by_P, c_max_by_Q))
+                else:
+                    c_max_iter = max(0, c_max_by_P)
 
-            for c in range(c_max_iter, -1, -1):
+            # Heuristic guess jumlah terbaik untuk indeks ini (berbasis P)
+            if P_u > 0:
+                c_guess = int(round((P_meas - cur_P) / P_u))
+            else:
+                c_guess = 0
+            c_guess = max(0, min(c_guess, c_max_iter))
+
+            # Iterasi zig-zag sekitar tebakan agar cepat dapat solusi bagus → lebih banyak pruning selanjutnya
+            for c in _counts_order(c_guess, c_max_iter):
                 cur_counts[idx] = c
-                dfs(idx + 1, cur_activeP + c * P_u_act)
+                dfs(idx + 1, cur_activeP + c * P_u, cur_activeQ + c * Q_u)
+                if perfect_found:
+                    break
             cur_counts[idx] = 0
 
-        dfs(0, 0.0)
+        # ====== panggil DFS baru ======
+        dfs(0, 0.0, 0.0)
+
 
         on = {names[i]: int(c) for i, c in enumerate(best_counts) if c > 0}
-        P_hat, I_hat, PF_hat = self._aggregate(best_counts, units_activeP, units_pf, V, baseline_P)
+        P_hat, I_hat, PF_hat, V_hat = self._aggregate(best_counts, units_activeP, units_pf, V, baseline_P)
         return {
             "on": on,
             "target": {"P": P_meas, "I": I_meas, "PF": PF_meas, "V": V},
-            "pred":   {"P": P_hat,  "I": I_hat,  "PF": PF_hat},
+            "pred":   {"P": P_hat,  "I": I_hat,  "PF": PF_hat, "V": V_hat},
             "loss": float(best_loss),
             "rel_error_P": float(abs(P_hat - P_meas) / max(1.0, P_meas)),
         }

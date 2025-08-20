@@ -6,3 +6,4 @@ dist/
 .venv/
 venv/
 src/stroomer.egg-info
+notes.md
