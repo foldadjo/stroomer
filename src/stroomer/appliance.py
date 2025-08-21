@@ -24,7 +24,7 @@ class StroomerPredictor:
         # ---------- LIGHTING ----------
         "lampu": {
             "watt": 10,
-            "pf": 0.60,
+            "pf": 1,
             "type": "led",
             "phase": 1,
             "standby_w": 0,
@@ -32,7 +32,7 @@ class StroomerPredictor:
         },
         "lampu_led_5w": {
             "watt": 5,
-            "pf": 0.60,
+            "pf": 1,
             "type": "led",
             "phase": 1,
             "standby_w": 0,
@@ -40,7 +40,7 @@ class StroomerPredictor:
         },
         "lampu_led_7w": {
             "watt": 7,
-            "pf": 0.60,
+            "pf": 1,
             "type": "led",
             "phase": 1,
             "standby_w": 0,
@@ -56,7 +56,7 @@ class StroomerPredictor:
         },
         "lampu_12w": {
             "watt": 12,
-            "pf": 0.65,
+            "pf": 1,
             "type": "led",
             "phase": 1,
             "standby_w": 0,
@@ -64,7 +64,7 @@ class StroomerPredictor:
         },
         "lampu_18w": {
             "watt": 18,
-            "pf": 0.65,
+            "pf": 1,
             "type": "led",
             "phase": 1,
             "standby_w": 0,
@@ -72,7 +72,7 @@ class StroomerPredictor:
         },
         "lampu_32w": {
             "watt": 32,
-            "pf": 0.70,
+            "pf": 1,
             "type": "led",
             "phase": 1,
             "standby_w": 0,
@@ -80,7 +80,7 @@ class StroomerPredictor:
         },
         "downlight_led_12w": {
             "watt": 12,
-            "pf": 0.70,
+            "pf": 1,
             "type": "led",
             "phase": 1,
             "standby_w": 0,
@@ -88,7 +88,7 @@ class StroomerPredictor:
         },
         "spotlight_led_50w": {
             "watt": 50,
-            "pf": 0.90,
+            "pf": 1,
             "type": "led",
             "phase": 1,
             "standby_w": 0,
@@ -96,7 +96,7 @@ class StroomerPredictor:
         },
         "lampu_cfl_15w": {
             "watt": 15,
-            "pf": 0.55,
+            "pf": 1,
             "type": "smps",
             "phase": 1,
             "standby_w": 0,
@@ -104,7 +104,7 @@ class StroomerPredictor:
         },
         "lampu_cfl_23w": {
             "watt": 23,
-            "pf": 0.55,
+            "pf": 1,
             "type": "smps",
             "phase": 1,
             "standby_w": 0,
@@ -112,7 +112,7 @@ class StroomerPredictor:
         },
         "lampu_tl_18w": {
             "watt": 18,
-            "pf": 0.50,
+            "pf": 1,
             "type": "inductive",
             "phase": 1,
             "standby_w": 0,
@@ -120,7 +120,7 @@ class StroomerPredictor:
         },
         "lampu_tl_36w": {
             "watt": 36,
-            "pf": 0.50,
+            "pf": 1,
             "type": "inductive",
             "phase": 1,
             "standby_w": 0,
@@ -128,7 +128,7 @@ class StroomerPredictor:
         },
         "lampu_halogen_20w": {
             "watt": 20,
-            "pf": 1.00,
+            "pf": 1,
             "type": "resistive",
             "phase": 1,
             "standby_w": 0,
@@ -136,7 +136,7 @@ class StroomerPredictor:
         },
         "lampu_halogen_50w": {
             "watt": 50,
-            "pf": 1.00,
+            "pf": 1,
             "type": "resistive",
             "phase": 1,
             "standby_w": 0,
@@ -144,7 +144,7 @@ class StroomerPredictor:
         },
         "lampu_meja": {
             "watt": 8,
-            "pf": 0.60,
+            "pf": 1,
             "type": "led",
             "phase": 1,
             "standby_w": 0.2,
@@ -152,7 +152,7 @@ class StroomerPredictor:
         },
         "lampu_taman": {
             "watt": 5,
-            "pf": 0.50,
+            "pf": 1,
             "type": "led",
             "phase": 1,
             "standby_w": 0,
@@ -816,7 +816,7 @@ class StroomerPredictor:
         # ---------- EV AC CHARGERS ----------
         "ev_charger_1p_6a": {
             "watt": 1320,
-            "pf": 0.98,
+            "pf": 1,
             "type": "smps",
             "phase": 1,
             "standby_w": 4,
@@ -824,7 +824,7 @@ class StroomerPredictor:
         },
         "ev_charger_1p_10a": {
             "watt": 2200,
-            "pf": 0.98,
+            "pf": 1,
             "type": "smps",
             "phase": 1,
             "standby_w": 4,
@@ -832,7 +832,7 @@ class StroomerPredictor:
         },
         "ev_charger_1p_16a": {
             "watt": 3520,
-            "pf": 0.99,
+            "pf": 1,
             "type": "smps",
             "phase": 1,
             "standby_w": 4,
@@ -840,7 +840,7 @@ class StroomerPredictor:
         },
         "ev_charger_3p_11kw": {
             "watt": 11000,
-            "pf": 0.99,
+            "pf": 1,
             "type": "smps",
             "phase": 3,
             "standby_w": 8,
@@ -848,7 +848,7 @@ class StroomerPredictor:
         },
         "ev_charger_3p_22kw": {
             "watt": 22000,
-            "pf": 0.99,
+            "pf": 1,
             "type": "smps",
             "phase": 3,
             "standby_w": 8,
@@ -1063,7 +1063,7 @@ class StroomerPredictor:
             if key not in self._catalog:
                 self._catalog[key] = {
                     "watt": watt,
-                    "pf": 0.60,
+                    "pf": 1,
                     "type": "led",
                     "phase": 1,
                     "standby_w": 0.0,
